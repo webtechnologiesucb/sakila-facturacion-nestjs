@@ -1,0 +1,15 @@
+node_modules
+dist
+coverage
+.git
+.gitignore
+.github
+*.log
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+!.env.production.example
+tmp
+.vscode
+.idea

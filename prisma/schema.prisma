@@ -1,0 +1,743 @@
+// ============================================================================
+// Sakila Facturación Electrónica Boliviana
+// Esquema de persistencia: tablas comerciales Sakila + tablas fiscales propias.
+// PROTOTIPO ACADÉMICO. No certificado por el SIN. Ver docs/NORMATIVA.md.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// Enumeraciones fiscales internas. NO son catálogos oficiales del SIN.
+// ----------------------------------------------------------------------------
+
+enum UserRole {
+  ADMIN
+  BILLING
+  ANALYST
+  VIEWER
+}
+
+enum TaxEnvironment {
+  SIMULATED
+  TEST
+  PRODUCTION
+}
+
+enum TaxModality {
+  ELECTRONICA_EN_LINEA
+  COMPUTARIZADA_EN_LINEA
+  PORTAL_WEB_EN_LINEA
+}
+
+// Estados internos. Deben mapearse a los estados oficiales de la modalidad.
+enum InvoiceStatus {
+  BORRADOR
+  PENDIENTE_DE_VALIDACION
+  PENDIENTE_DE_ENVIO
+  EN_PROCESAMIENTO
+  AUTORIZADA
+  RECHAZADA
+  PENDIENTE_DE_ANULACION
+  ANULADA
+  EN_CONTINGENCIA
+}
+
+enum DocumentType {
+  FACTURA
+  NOTA_CREDITO
+  NOTA_DEBITO
+}
+
+enum ValidationStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  DEPRECATED
+}
+
+enum ContingencyStatus {
+  ABIERTA
+  CERRADA
+  REGULARIZADA
+}
+
+enum CancellationStatus {
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+  REVERTIDA
+}
+
+enum SignatureStatus {
+  NO_REQUERIDA
+  PENDIENTE
+  FIRMADA_SIMULADA
+  FIRMADA
+}
+
+// ----------------------------------------------------------------------------
+// SAKILA (referencia comercial). Tablas originales, sin mezclar con fiscal.
+// Se usa un subconjunto coherente; ver docs/SAKILA_MAPPING.md.
+// ----------------------------------------------------------------------------
+
+model SakilaActor {
+  actorId    Int                @id @default(autoincrement()) @map("actor_id")
+  firstName  String             @map("first_name") @db.VarChar(45)
+  lastName   String             @map("last_name") @db.VarChar(45)
+  lastUpdate DateTime           @default(now()) @map("last_update")
+  filmActors SakilaFilmActor[]
+
+  @@map("actor")
+}
+
+model SakilaLanguage {
+  languageId Int            @id @default(autoincrement()) @map("language_id")
+  name       String         @db.VarChar(30)
+  lastUpdate DateTime       @default(now()) @map("last_update")
+  films      SakilaFilm[]   @relation("FilmLanguage")
+
+  @@map("language")
+}
+
+model SakilaCategory {
+  categoryId     Int                  @id @default(autoincrement()) @map("category_id")
+  name           String               @db.VarChar(25)
+  lastUpdate     DateTime             @default(now()) @map("last_update")
+  filmCategories SakilaFilmCategory[]
+  productCategories ProductCategory[]
+
+  @@map("category")
+}
+
+model SakilaCountry {
+  countryId  Int          @id @default(autoincrement()) @map("country_id")
+  country    String       @db.VarChar(50)
+  lastUpdate DateTime     @default(now()) @map("last_update")
+  cities     SakilaCity[]
+
+  @@map("country")
+}
+
+model SakilaCity {
+  cityId     Int             @id @default(autoincrement()) @map("city_id")
+  city       String          @db.VarChar(50)
+  countryId  Int             @map("country_id")
+  lastUpdate DateTime        @default(now()) @map("last_update")
+  country    SakilaCountry   @relation(fields: [countryId], references: [countryId])
+  addresses  SakilaAddress[]
+
+  @@index([countryId])
+  @@map("city")
+}
+
+model SakilaAddress {
+  addressId  Int             @id @default(autoincrement()) @map("address_id")
+  address    String          @db.VarChar(50)
+  address2   String?         @db.VarChar(50)
+  district   String          @db.VarChar(20)
+  cityId     Int             @map("city_id")
+  postalCode String?         @map("postal_code") @db.VarChar(10)
+  phone      String          @db.VarChar(20)
+  lastUpdate DateTime        @default(now()) @map("last_update")
+  city       SakilaCity      @relation(fields: [cityId], references: [cityId])
+  stores     SakilaStore[]
+  customers  SakilaCustomer[]
+  staff      SakilaStaff[]
+
+  @@index([cityId])
+  @@map("address")
+}
+
+model SakilaStore {
+  storeId        Int              @id @default(autoincrement()) @map("store_id")
+  managerStaffId Int?             @unique @map("manager_staff_id")
+  addressId      Int              @map("address_id")
+  lastUpdate     DateTime         @default(now()) @map("last_update")
+  manager        SakilaStaff?     @relation("StoreManager", fields: [managerStaffId], references: [staffId])
+  address        SakilaAddress    @relation(fields: [addressId], references: [addressId])
+  staff          SakilaStaff[]    @relation("StoreStaff")
+  inventory      SakilaInventory[]
+  customers      SakilaCustomer[]
+
+  @@index([addressId])
+  @@map("store")
+}
+
+model SakilaStaff {
+  staffId    Int             @id @default(autoincrement()) @map("staff_id")
+  firstName  String          @map("first_name") @db.VarChar(45)
+  lastName   String          @map("last_name") @db.VarChar(45)
+  addressId  Int             @map("address_id")
+  email      String?         @db.VarChar(50)
+  storeId    Int             @map("store_id")
+  active     Boolean         @default(true)
+  username   String          @db.VarChar(16)
+  lastUpdate DateTime        @default(now()) @map("last_update")
+  address    SakilaAddress   @relation(fields: [addressId], references: [addressId])
+  store      SakilaStore     @relation("StoreStaff", fields: [storeId], references: [storeId])
+  managedStore SakilaStore?  @relation("StoreManager")
+  rentals    SakilaRental[]
+  payments   SakilaPayment[]
+
+  @@index([addressId])
+  @@index([storeId])
+  @@map("staff")
+}
+
+model SakilaCustomer {
+  customerId  Int              @id @default(autoincrement()) @map("customer_id")
+  storeId     Int              @map("store_id")
+  firstName   String           @map("first_name") @db.VarChar(45)
+  lastName    String           @map("last_name") @db.VarChar(45)
+  email       String?          @db.VarChar(50)
+  addressId   Int              @map("address_id")
+  activebool  Boolean          @default(true) @map("activebool")
+  createDate  DateTime         @default(now()) @map("create_date")
+  lastUpdate  DateTime         @default(now()) @map("last_update")
+  store       SakilaStore      @relation(fields: [storeId], references: [storeId])
+  address     SakilaAddress    @relation(fields: [addressId], references: [addressId])
+  rentals     SakilaRental[]
+  payments    SakilaPayment[]
+  taxCustomer Customer?
+
+  @@index([storeId])
+  @@index([lastName])
+  @@map("customer")
+}
+
+model SakilaFilm {
+  filmId           Int                  @id @default(autoincrement()) @map("film_id")
+  title            String               @db.VarChar(255)
+  description      String?              @db.Text
+  releaseYear      Int?                 @map("release_year")
+  languageId       Int                  @map("language_id")
+  rentalDuration   Int                  @default(3) @map("rental_duration")
+  rentalRate       Decimal              @default(4.99) @map("rental_rate") @db.Decimal(5, 2)
+  length           Int?
+  replacementCost  Decimal              @default(19.99) @map("replacement_cost") @db.Decimal(5, 2)
+  rating           String               @default("G") @db.VarChar(10)
+  specialFeatures  String[]             @default([]) @map("special_features")
+  lastUpdate       DateTime             @default(now()) @map("last_update")
+  language         SakilaLanguage       @relation("FilmLanguage", fields: [languageId], references: [languageId])
+  filmActors       SakilaFilmActor[]
+  filmCategories   SakilaFilmCategory[]
+  inventory        SakilaInventory[]
+  taxProduct       Product?
+
+  @@index([title])
+  @@map("film")
+}
+
+model SakilaFilmActor {
+  actorId    Int          @map("actor_id")
+  filmId     Int          @map("film_id")
+  lastUpdate DateTime     @default(now()) @map("last_update")
+  actor      SakilaActor  @relation(fields: [actorId], references: [actorId])
+  film       SakilaFilm   @relation(fields: [filmId], references: [filmId])
+
+  @@id([actorId, filmId])
+  @@map("film_actor")
+}
+
+model SakilaFilmCategory {
+  filmId     Int             @map("film_id")
+  categoryId Int             @map("category_id")
+  lastUpdate DateTime        @default(now()) @map("last_update")
+  film       SakilaFilm      @relation(fields: [filmId], references: [filmId])
+  category   SakilaCategory  @relation(fields: [categoryId], references: [categoryId])
+
+  @@id([filmId, categoryId])
+  @@map("film_category")
+}
+
+model SakilaInventory {
+  inventoryId Int             @id @default(autoincrement()) @map("inventory_id")
+  filmId      Int             @map("film_id")
+  storeId     Int             @map("store_id")
+  lastUpdate  DateTime        @default(now()) @map("last_update")
+  film        SakilaFilm      @relation(fields: [filmId], references: [filmId])
+  store       SakilaStore     @relation(fields: [storeId], references: [storeId])
+  rentals     SakilaRental[]
+
+  @@index([filmId])
+  @@index([storeId])
+  @@map("inventory")
+}
+
+model SakilaRental {
+  rentalId    Int              @id @default(autoincrement()) @map("rental_id")
+  rentalDate  DateTime         @default(now()) @map("rental_date")
+  inventoryId Int              @map("inventory_id")
+  customerId  Int              @map("customer_id")
+  returnDate  DateTime?        @map("return_date")
+  staffId     Int              @map("staff_id")
+  lastUpdate  DateTime         @default(now()) @map("last_update")
+  inventory   SakilaInventory  @relation(fields: [inventoryId], references: [inventoryId])
+  customer    SakilaCustomer   @relation(fields: [customerId], references: [customerId])
+  staff       SakilaStaff      @relation(fields: [staffId], references: [staffId])
+  payments    SakilaPayment[]
+
+  @@index([inventoryId])
+  @@index([customerId])
+  @@index([staffId])
+  @@map("rental")
+}
+
+model SakilaPayment {
+  paymentId   Int             @id @default(autoincrement()) @map("payment_id")
+  customerId  Int             @map("customer_id")
+  staffId     Int             @map("staff_id")
+  rentalId    Int?            @map("rental_id")
+  amount      Decimal         @db.Decimal(8, 2)
+  paymentDate DateTime        @default(now()) @map("payment_date")
+  lastUpdate  DateTime        @default(now()) @map("last_update")
+  customer    SakilaCustomer  @relation(fields: [customerId], references: [customerId])
+  staff       SakilaStaff     @relation(fields: [staffId], references: [staffId])
+  rental      SakilaRental?   @relation(fields: [rentalId], references: [rentalId])
+
+  @@index([customerId])
+  @@index([staffId])
+  @@index([rentalId])
+  @@map("payment")
+}
+
+// ----------------------------------------------------------------------------
+// AUTENTICACIÓN / USUARIOS
+// ----------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique @db.VarChar(200)
+  name         String   @db.VarChar(150)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  role         UserRole @default(VIEWER)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  auditLogs    AuditLog[]
+  invoiceEvents InvoiceEvent[]
+
+  @@index([role])
+  @@map("users")
+}
+
+// ----------------------------------------------------------------------------
+// EMISOR, SUCURSALES Y PUNTOS DE VENTA
+// ----------------------------------------------------------------------------
+
+model Issuer {
+  id             String     @id @default(uuid()) @db.Uuid
+  nit            String     @unique @db.VarChar(20)
+  legalName      String     @map("legal_name") @db.VarChar(250)
+  businessName   String?    @map("business_name") @db.VarChar(250)
+  economicActivityCode String? @map("economic_activity_code") @db.VarChar(20)
+  address        String     @db.Text
+  phone          String?    @db.VarChar(40)
+  email          String?    @db.VarChar(150)
+  active         Boolean    @default(true)
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+  branches       Branch[]
+  configurations TaxConfiguration[]
+  sequences      InvoiceSequence[]
+  invoices       Invoice[]
+  credentials    SiatCredential[]
+  contingencies  ContingencyEvent[]
+
+  @@map("tax_issuers")
+}
+
+model Branch {
+  id        String   @id @default(uuid()) @db.Uuid
+  issuerId  String   @map("issuer_id") @db.Uuid
+  code      String   @db.VarChar(20)
+  name      String   @db.VarChar(200)
+  address   String   @db.Text
+  municipality String? @db.VarChar(120)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  issuer    Issuer   @relation(fields: [issuerId], references: [id])
+  pointsOfSale PointOfSale[]
+  invoices  Invoice[]
+  sequences InvoiceSequence[]
+
+  @@unique([issuerId, code])
+  @@index([issuerId])
+  @@map("tax_branches")
+}
+
+model PointOfSale {
+  id        String   @id @default(uuid()) @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  code      String   @db.VarChar(20)
+  name      String   @db.VarChar(200)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  invoices  Invoice[]
+  sequences InvoiceSequence[]
+
+  @@unique([branchId, code])
+  @@index([branchId])
+  @@map("tax_points_of_sale")
+}
+
+// ----------------------------------------------------------------------------
+// CLIENTES Y PRODUCTOS FISCALES
+// ----------------------------------------------------------------------------
+
+model Customer {
+  id               String   @id @default(uuid()) @db.Uuid
+  sakilaCustomerId Int?     @unique @map("sakila_customer_id")
+  documentType     String   @map("document_type") @db.VarChar(10)
+  documentNumber   String   @map("document_number") @db.VarChar(30)
+  businessName     String   @map("business_name") @db.VarChar(250)
+  email            String?  @db.VarChar(150)
+  phone            String?  @db.VarChar(40)
+  address          String?  @db.Text
+  taxpayerType     String?  @map("taxpayer_type") @db.VarChar(30)
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  sakilaCustomer   SakilaCustomer? @relation(fields: [sakilaCustomerId], references: [customerId])
+  invoices         Invoice[]
+
+  @@unique([documentType, documentNumber])
+  @@index([businessName])
+  @@map("tax_customers")
+}
+
+model ProductCategory {
+  id              String    @id @default(uuid()) @db.Uuid
+  name            String    @db.VarChar(120)
+  sakilaCategoryId Int?     @unique @map("sakila_category_id")
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  sakilaCategory  SakilaCategory? @relation(fields: [sakilaCategoryId], references: [categoryId])
+  products        Product[]
+
+  @@map("tax_product_categories")
+}
+
+model Product {
+  id             String          @id @default(uuid()) @db.Uuid
+  sakilaFilmId   Int?            @unique @map("sakila_film_id")
+  categoryId     String          @map("category_id") @db.Uuid
+  sku            String          @unique @db.VarChar(60)
+  name           String          @db.VarChar(250)
+  description    String?         @db.Text
+  unitOfMeasure  String          @map("unit_of_measure") @db.VarChar(20)
+  unitPrice      Decimal         @map("unit_price") @db.Decimal(18, 4)
+  taxCode        String?         @map("tax_code") @db.VarChar(40)
+  taxRate        Decimal         @map("tax_rate") @db.Decimal(9, 6)
+  taxIncluded    Boolean         @default(false) @map("tax_included")
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  category       ProductCategory @relation(fields: [categoryId], references: [id])
+  sakilaFilm     SakilaFilm?     @relation(fields: [sakilaFilmId], references: [filmId])
+  invoiceItems   InvoiceItem[]
+
+  @@index([categoryId])
+  @@index([name])
+  @@map("tax_products")
+}
+
+// ----------------------------------------------------------------------------
+// CONFIGURACIÓN TRIBUTARIA VERSIONADA Y REGLAS
+// ----------------------------------------------------------------------------
+
+model TaxConfiguration {
+  id               String           @id @default(uuid()) @db.Uuid
+  issuerId         String           @map("issuer_id") @db.Uuid
+  name             String           @db.VarChar(150)
+  version          Int
+  environment      TaxEnvironment   @default(SIMULATED)
+  modality         TaxModality      @default(ELECTRONICA_EN_LINEA)
+  currency         String           @default("BOB") @db.VarChar(3)
+  priceIncludesTax Boolean          @default(false) @map("price_includes_tax")
+  defaultTaxRate   Decimal          @default(0) @map("default_tax_rate") @db.Decimal(9, 6)
+  roundingMode     String           @default("ROUND_HALF_UP") @map("rounding_mode") @db.VarChar(30)
+  effectiveFrom    DateTime         @default(now()) @map("effective_from")
+  effectiveTo      DateTime?        @map("effective_to")
+  sourceReference  String           @map("source_reference") @db.Text
+  validationStatus ValidationStatus @default(PENDING_VERIFICATION) @map("validation_status")
+  verifiedBy       String?          @map("verified_by") @db.VarChar(150)
+  notes            String?          @db.Text
+  active           Boolean          @default(true)
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  issuer           Issuer           @relation(fields: [issuerId], references: [id])
+  rules            TaxRule[]
+  invoices         Invoice[]
+
+  @@unique([issuerId, version])
+  @@index([issuerId, active])
+  @@map("tax_configurations")
+}
+
+model TaxRule {
+  id              String           @id @default(uuid()) @db.Uuid
+  configurationId String           @map("configuration_id") @db.Uuid
+  code            String           @db.VarChar(40)
+  name            String           @db.VarChar(150)
+  taxType         String           @map("tax_type") @db.VarChar(30)
+  rate            Decimal          @db.Decimal(9, 6)
+  sourceReference String           @map("source_reference") @db.Text
+  validationStatus ValidationStatus @default(PENDING_VERIFICATION) @map("validation_status")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  configuration   TaxConfiguration @relation(fields: [configurationId], references: [id])
+
+  @@unique([configurationId, code])
+  @@map("tax_rules")
+}
+
+// ----------------------------------------------------------------------------
+// DOCUMENTOS FISCALES
+// ----------------------------------------------------------------------------
+
+model Invoice {
+  id                 String         @id @default(uuid()) @db.Uuid
+  publicId           String         @unique @map("public_id") @db.VarChar(60)
+  idempotencyKey     String         @unique @map("idempotency_key") @db.VarChar(120)
+  issuerId           String         @map("issuer_id") @db.Uuid
+  branchId           String         @map("branch_id") @db.Uuid
+  pointOfSaleId      String         @map("point_of_sale_id") @db.Uuid
+  configurationId    String         @map("configuration_id") @db.Uuid
+  customerId         String         @map("customer_id") @db.Uuid
+  customerSnapshot   Json           @map("customer_snapshot")
+  contingencyId      String?        @map("contingency_id") @db.Uuid
+  documentType       DocumentType   @default(FACTURA) @map("document_type")
+  modality           TaxModality    @default(ELECTRONICA_EN_LINEA)
+  documentSector     String         @default("1") @map("document_sector") @db.VarChar(10)
+  serie              String         @db.VarChar(20)
+  number             Int
+  cuf                String?        @unique @db.VarChar(120)
+  cufd               String?        @db.VarChar(160)
+  cuis               String?        @db.VarChar(160)
+  controlCode        String?        @map("control_code") @db.VarChar(120)
+  issueDate          DateTime       @map("issue_date")
+  currency           String         @default("BOB") @db.VarChar(3)
+  exchangeRate       Decimal        @default(1) @map("exchange_rate") @db.Decimal(18, 6)
+  subtotal           Decimal        @db.Decimal(18, 4)
+  discountTotal      Decimal        @default(0) @map("discount_total") @db.Decimal(18, 4)
+  taxableBase        Decimal        @map("taxable_base") @db.Decimal(18, 4)
+  taxTotal           Decimal        @default(0) @map("tax_total") @db.Decimal(18, 4)
+  total              Decimal        @db.Decimal(18, 4)
+  status             InvoiceStatus  @default(BORRADOR)
+  taxStatus          String?        @map("tax_status") @db.VarChar(60)
+  receptionCode      String?        @map("reception_code") @db.VarChar(120)
+  authorizationCode  String?        @map("authorization_code") @db.VarChar(120)
+  documentHash       String?        @map("document_hash") @db.VarChar(128)
+  originalInvoiceId  String?        @map("original_invoice_id") @db.Uuid
+  simulated          Boolean        @default(true)
+  frozenAt           DateTime?      @map("frozen_at")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  issuer         Issuer          @relation(fields: [issuerId], references: [id])
+  branch         Branch          @relation(fields: [branchId], references: [id])
+  pointOfSale    PointOfSale     @relation(fields: [pointOfSaleId], references: [id])
+  configuration  TaxConfiguration @relation(fields: [configurationId], references: [id])
+  customer       Customer        @relation(fields: [customerId], references: [id])
+  contingency    ContingencyEvent? @relation(fields: [contingencyId], references: [id])
+  originalInvoice Invoice?       @relation("InvoiceCorrection", fields: [originalInvoiceId], references: [id])
+  corrections     Invoice[]      @relation("InvoiceCorrection")
+  items           InvoiceItem[]
+  events          InvoiceEvent[]
+  document        InvoiceDocument?
+  cancellations   CancellationRequest[]
+  siatRequests    SiatRequest[]
+
+  @@unique([issuerId, branchId, pointOfSaleId, documentType, serie, number])
+  @@index([issuerId, issueDate])
+  @@index([status])
+  @@index([customerId])
+  @@map("tax_invoices")
+}
+
+model InvoiceItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  invoiceId      String   @map("invoice_id") @db.Uuid
+  productId      String?  @map("product_id") @db.Uuid
+  lineNumber     Int      @map("line_number")
+  description    String   @db.VarChar(500)
+  productCode    String?  @map("product_code") @db.VarChar(80)
+  unitOfMeasure  String   @map("unit_of_measure") @db.VarChar(20)
+  quantity       Decimal  @db.Decimal(18, 4)
+  unitPrice      Decimal  @map("unit_price") @db.Decimal(18, 4)
+  discount       Decimal  @default(0) @db.Decimal(18, 4)
+  lineSubtotal   Decimal  @map("line_subtotal") @db.Decimal(18, 4)
+  taxRate        Decimal  @map("tax_rate") @db.Decimal(9, 6)
+  taxAmount      Decimal  @map("tax_amount") @db.Decimal(18, 4)
+  lineTotal      Decimal  @map("line_total") @db.Decimal(18, 4)
+  createdAt      DateTime @default(now()) @map("created_at")
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product        Product? @relation(fields: [productId], references: [id])
+
+  @@unique([invoiceId, lineNumber])
+  @@index([invoiceId])
+  @@map("tax_invoice_items")
+}
+
+model InvoiceEvent {
+  id           String         @id @default(uuid()) @db.Uuid
+  invoiceId    String         @map("invoice_id") @db.Uuid
+  type         String         @db.VarChar(60)
+  fromStatus   InvoiceStatus? @map("from_status")
+  toStatus     InvoiceStatus? @map("to_status")
+  actorId      String?        @map("actor_id") @db.Uuid
+  correlationId String?       @map("correlation_id") @db.VarChar(80)
+  message      String?        @db.Text
+  payload      Json?
+  createdAt    DateTime       @default(now()) @map("created_at")
+  invoice      Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  actor        User?          @relation(fields: [actorId], references: [id])
+
+  @@index([invoiceId, createdAt])
+  @@map("tax_invoice_events")
+}
+
+model InvoiceSequence {
+  id            String      @id @default(uuid()) @db.Uuid
+  issuerId      String      @map("issuer_id") @db.Uuid
+  branchId      String      @map("branch_id") @db.Uuid
+  pointOfSaleId String      @map("point_of_sale_id") @db.Uuid
+  documentType  DocumentType @map("document_type")
+  serie         String      @db.VarChar(20)
+  nextNumber    Int         @default(1) @map("next_number")
+  version       Int         @default(0)
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  issuer        Issuer      @relation(fields: [issuerId], references: [id])
+  branch        Branch      @relation(fields: [branchId], references: [id])
+  pointOfSale   PointOfSale @relation(fields: [pointOfSaleId], references: [id])
+
+  @@unique([issuerId, branchId, pointOfSaleId, documentType, serie])
+  @@map("tax_invoice_sequences")
+}
+
+model InvoiceDocument {
+  id              String          @id @default(uuid()) @db.Uuid
+  invoiceId       String          @unique @map("invoice_id") @db.Uuid
+  profileId       String          @map("profile_id") @db.VarChar(80)
+  xml             String          @db.Text
+  xmlHash         String          @map("xml_hash") @db.VarChar(128)
+  xsdVersion      String?         @map("xsd_version") @db.VarChar(60)
+  xsdValidated    Boolean         @default(false) @map("xsd_validated")
+  signatureStatus SignatureStatus @default(PENDIENTE) @map("signature_status")
+  signedAt        DateTime?       @map("signed_at")
+  signatureProvider String?       @map("signature_provider") @db.VarChar(80)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  invoice         Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("tax_invoice_documents")
+}
+
+model CancellationRequest {
+  id              String             @id @default(uuid()) @db.Uuid
+  invoiceId       String             @map("invoice_id") @db.Uuid
+  reason          String             @db.Text
+  status          CancellationStatus @default(PENDIENTE)
+  requestedBy     String             @map("requested_by") @db.Uuid
+  requestedAt     DateTime           @default(now()) @map("requested_at")
+  resolvedAt      DateTime?          @map("resolved_at")
+  responseCode    String?            @map("response_code") @db.VarChar(60)
+  responseMessage String?            @map("response_message") @db.Text
+  reversalOfId    String?            @map("reversal_of_id") @db.Uuid
+  invoice         Invoice            @relation(fields: [invoiceId], references: [id])
+  reversalOf      CancellationRequest? @relation("CancellationReversal", fields: [reversalOfId], references: [id])
+  reversals       CancellationRequest[] @relation("CancellationReversal")
+
+  @@index([invoiceId, requestedAt])
+  @@map("tax_cancellation_requests")
+}
+
+// ----------------------------------------------------------------------------
+// INTEGRACIÓN TRIBUTARIA (sin secretos en claro)
+// ----------------------------------------------------------------------------
+
+model SiatCredential {
+  id           String         @id @default(uuid()) @db.Uuid
+  issuerId     String         @map("issuer_id") @db.Uuid
+  environment  TaxEnvironment
+  label        String         @db.VarChar(80)
+  secretRef    String         @map("secret_ref") @db.VarChar(200)
+  status       String         @default("PENDIENTE") @db.VarChar(30)
+  expiresAt    DateTime?      @map("expires_at")
+  metadata     Json?
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  issuer       Issuer         @relation(fields: [issuerId], references: [id])
+
+  @@unique([issuerId, environment, label])
+  @@map("tax_siat_credentials")
+}
+
+model SiatRequest {
+  id             String   @id @default(uuid()) @db.Uuid
+  invoiceId      String?  @map("invoice_id") @db.Uuid
+  operation      String   @db.VarChar(80)
+  correlationId  String   @map("correlation_id") @db.VarChar(80)
+  idempotencyKey String?  @map("idempotency_key") @db.VarChar(120)
+  requestPayload Json?    @map("request_payload")
+  responsePayload Json?   @map("response_payload")
+  success        Boolean  @default(false)
+  errorCode      String?  @map("error_code") @db.VarChar(60)
+  message        String?  @db.Text
+  httpStatus     Int?     @map("http_status")
+  attempt        Int      @default(1)
+  durationMs     Int?     @map("duration_ms")
+  createdAt      DateTime @default(now()) @map("created_at")
+  invoice        Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId, createdAt])
+  @@index([correlationId])
+  @@index([operation])
+  @@map("tax_siat_requests")
+}
+
+model ContingencyEvent {
+  id          String            @id @default(uuid()) @db.Uuid
+  issuerId    String            @map("issuer_id") @db.Uuid
+  type        String            @db.VarChar(80)
+  description String            @db.Text
+  status      ContingencyStatus @default(ABIERTA)
+  startedAt   DateTime          @default(now()) @map("started_at")
+  endedAt     DateTime?         @map("ended_at")
+  reportedAt  DateTime?         @map("reported_at")
+  eventCode   String?           @map("event_code") @db.VarChar(80)
+  createdBy   String?           @map("created_by") @db.Uuid
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  issuer      Issuer            @relation(fields: [issuerId], references: [id])
+  invoices    Invoice[]
+
+  @@index([issuerId, status])
+  @@map("tax_contingency_events")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  actorId   String?  @map("actor_id") @db.Uuid
+  action    String   @db.VarChar(100)
+  entity    String   @db.VarChar(80)
+  entityId  String?  @map("entity_id") @db.VarChar(80)
+  before    Json?
+  after     Json?
+  ip        String?  @db.VarChar(60)
+  userAgent String?  @map("user_agent") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  actor     User?    @relation(fields: [actorId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
