@@ -1,3 +1,5 @@
+name: sakila-facturacion-dev
+
 services:
   db:
     image: postgres:17.2-alpine3.20
@@ -13,6 +15,7 @@ services:
       - sakila_pgdata_dev:/var/lib/postgresql/data
     networks:
       - internal
+      - edge
     security_opt:
       - no-new-privileges:true
     healthcheck:
@@ -57,6 +60,7 @@ services:
         condition: service_healthy
     networks:
       - internal
+      - edge
     security_opt:
       - no-new-privileges:true
     healthcheck:
@@ -69,6 +73,11 @@ services:
 networks:
   internal:
     internal: true
+  edge:
+    # Permite acceder desde el host a la API y a PostgreSQL en desarrollo.
+    internal: false
 
 volumes:
+  # Volumen con prefijo del proyecto (sakila-facturacion-dev_sakila_pgdata_dev).
+  # No fijar `name`: la suite live usa un proyecto temporal y debe quedar aislada.
   sakila_pgdata_dev:

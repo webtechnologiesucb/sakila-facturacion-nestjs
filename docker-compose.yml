@@ -1,3 +1,5 @@
+name: sakila-facturacion-prod
+
 services:
   db:
     image: postgres:17.2-alpine3.20
@@ -52,6 +54,7 @@ services:
         condition: service_healthy
     networks:
       - internal
+      - edge
     security_opt:
       - no-new-privileges:true
     healthcheck:
@@ -64,6 +67,12 @@ services:
 networks:
   internal:
     internal: true
+  edge:
+    # Necesaria para publicar la API en el host. La base de datos permanece
+    # únicamente en la red interna, sin acceso desde el exterior.
+    internal: false
 
 volumes:
+  # Volumen con prefijo del proyecto (sakila-facturacion-prod_sakila_pgdata).
+  # No fijar `name`: la suite live usa un proyecto temporal y debe quedar aislada.
   sakila_pgdata:

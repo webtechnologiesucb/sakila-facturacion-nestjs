@@ -16,6 +16,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "test:docker": "jest --config ./test/jest-docker.json --runInBand",
+    "test:docker:live": "jest --config ./test/jest-docker-live.json --runInBand",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:migrate": "prisma migrate deploy",
